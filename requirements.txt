@@ -1,0 +1,26 @@
+# Django Framework
+Django>=4.2.0,<5.0.0
+python-dotenv>=1.0.0
+
+# LangChain and AI Libraries
+langchain>=0.1.0
+langchain-openai>=0.0.8
+langchain-community>=0.0.20
+openai>=1.12.0
+
+# Vector Store and Embeddings
+faiss-cpu>=1.7.4
+
+# PDF Processing
+pypdf>=4.0.1
+
+# Development and Debugging
+python-decouple>=3.8
+
+# Optional: For production deployment
+gunicorn>=21.2.0
+whitenoise>=6.6.0
+
+# Optional: For testing
+pytest>=7.4.0
+pytest-django>=4.7.0
