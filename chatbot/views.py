@@ -1,16 +1,19 @@
 # chatbot/views.py
 
-import os
 import json
-from django.shortcuts import render
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-from django.conf import settings
-from dotenv import load_dotenv
+import os
 
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from django.conf import settings
+from django.http import JsonResponse
+from django.shortcuts import render
+from django.views.decorators.csrf import csrf_exempt
+from dotenv import load_dotenv
 from langchain_community.vectorstores import FAISS
-from langchain.chains import ConversationalRetrievalChain
+from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.runnables import RunnablePassthrough
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 load_dotenv()
 
@@ -45,37 +48,46 @@ def chat_api(request):
         if not question:
             return JsonResponse({'error': 'Nenhuma pergunta fornecida.'}, status=400)
 
-        # Converter o histórico para o formato esperado pelo LangChain
-        # O LangChain espera uma lista de tuplas (pergunta, resposta)
-        formatted_history = []
+        # Converter o histórico para mensagens do LangChain
+        history_messages = []
         for item in chat_history:
             if isinstance(item, list) and len(item) >= 2:
-                formatted_history.append((item[0], item[1]))
+                history_messages.append(HumanMessage(content=item[0]))
+                history_messages.append(AIMessage(content=item[1]))
         
-        print(f"Histórico formatado: {formatted_history}")  # Para debug
+        print(f"Histórico: {len(history_messages)} mensagens")  # Para debug
 
-        # Criar a cadeia de conversação
-        # Usamos um modelo mais rápido e barato para o chatbot
+        # Criar o LLM
         llm = ChatOpenAI(temperature=0.7, model="gpt-3.5-turbo", openai_api_key=openai_api_key)
         
         # O retriever é a nossa busca no PDF
         retriever = vector_store.as_retriever()
-
-        # O ConversationalRetrievalChain junta tudo: o LLM, o retriever e o histórico
-        qa_chain = ConversationalRetrievalChain.from_llm(
-            llm=llm,
-            retriever=retriever,
-            return_source_documents=False # Não precisamos ver os chunks que ele usou
-        )
-
-        # Fazer a pergunta usando o método invoke (nova versão)
-        result = qa_chain.invoke({
-            'question': question, 
-            'chat_history': formatted_history
+        
+        # Buscar documentos relevantes
+        docs = retriever.invoke(question)
+        context = "\n\n".join([doc.page_content for doc in docs])
+        
+        # Criar o template do prompt
+        prompt_template = ChatPromptTemplate.from_messages([
+            ("system", "Você é um assistente útil que responde perguntas com base no seguinte contexto:\n\n{context}\n\nSe a informação não estiver no contexto, diga que não sabe."),
+            MessagesPlaceholder(variable_name="history"),
+            ("human", "{question}")
+        ])
+        
+        # Criar a chain
+        chain = prompt_template | llm | StrOutputParser()
+        
+        # Fazer a pergunta
+        answer = chain.invoke({
+            'context': context,
+            'history': history_messages,
+            'question': question
         })
-        answer = result['answer']
 
         return JsonResponse({'answer': answer})
+
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Corpo da requisição não é um JSON válido.'}, status=400)
 
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Corpo da requisição não é um JSON válido.'}, status=400)
